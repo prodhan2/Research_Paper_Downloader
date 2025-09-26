@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>arXiv QuickSearch — Multi-download</title>
+<style>
+:root{
+  --bg:#0f1724;
+  --card:#ffffff;
+  --muted:#9aa6b2;
+  --accent:#6d28d9;
+  --accent-2:#4338ca;
+  --text:#0f1724;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;padding:0;font-size:20px;font-family:Arial,sans-serif;}
+body{
+  background:#071024;
+  color:var(--text);
+  padding:12px;
+}
+.container{width:100%;padding:0 12px;}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;margin-bottom:24px}
+h1{font-size:32px;margin:0;color:white}
+p.lead{margin:0;color:var(--muted);font-size:18px}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;width:100%;}
+.select, .btn, input[type="search"]{
+  font-size:20px;padding:14px 18px;border-radius:12px;
+}
+.select{background:white;color:var(--text);border:1px solid #ccc;}
+.btn{cursor:pointer;transition:transform .08s ease;border:none;}
+.btn:active{transform:translateY(1px);}
+.btn.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:white;}
+.btn.ghost{background:transparent;border:2px solid rgba(255,255,255,0.6);color:white;}
+.searchbox{flex:1;display:flex;gap:10px;background:white;border-radius:14px;padding:6px 12px;align-items:center;}
+input[type="search"]{flex:1;border:none;outline:none;background:transparent;color:var(--text);font-size:20px;}
+
+/* main layout */
+.grid{display:grid;grid-template-columns:1fr;gap:24px}
+.card{background:white;border-radius:14px;padding:24px;box-shadow:0 6px 20px rgba(0,0,0,0.15)}
+.results{max-height:80vh;overflow:auto;margin-top:12px;}
+.item{display:flex;gap:16px;padding:20px;border-radius:14px;align-items:flex-start;border:1px solid #ccc;background:white;margin-bottom:14px;font-size:20px}
+.item:hover{background:#f1f1f1}
+.title{font-weight:600;font-size:22px;margin:0 0 10px 0;color:#0f1724}
+.meta{font-size:18px;color:var(--muted);margin-bottom:10px}
+.summary{font-size:18px;color:#333;line-height:1.6;max-height:none;overflow:hidden;text-overflow:ellipsis}
+.actions{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.badge{background:var(--accent);padding:8px 14px;border-radius:10px;font-size:18px;color:white;text-decoration:none}
+.checkbox{width:26px;height:26px;border-radius:6px;border:1px solid #ccc;display:inline-flex;align-items:center;justify-content:center}
+.date-highlight{color:#ef4444;font-weight:700;}
+.footer{margin-top:24px;text-align:center;color:var(--muted);font-size:18px}
+.center{display:flex;justify-content:center;padding:14px}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>Research  and Thesis paper Downloader </h1>
+      <p class="lead">Search papers, select multiple papers, and download PDFs quickly.</p>
+    </div>
+    <div class="controls">
+      <select id="sortBy" class="select">
+        <option value="lastUpdatedDate">Recent updates</option>
+        <option value="submittedDate">Submitted date</option>
+        <option value="relevance">Relevance</option>
+      </select>
+      <select id="sortOrder" class="select">
+        <option value="descending">Desc</option>
+        <option value="ascending">Asc</option>
+      </select>
+      <div class="searchbox">
+        <input id="q" type="search" placeholder="Search titles, authors, keywords...">
+        <button id="searchBtn" class="btn primary">Search</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section>
+      <div class="card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+          <button id="selectPage" class="btn ghost">Select page</button>
+          <button id="clearSel" class="btn">Clear</button>
+          <button id="downloadSel" class="btn primary">Download selected (0)</button>
+          <button id="zipSel" class="btn">ZIP download</button>
+          <div class="muted" id="statusInfo" style="margin-left:auto">No results yet</div>
+        </div>
+
+        <div id="results" class="results" role="list" aria-label="Search results">
+          <div style="padding:20px;text-align:center;color:var(--muted)">Type a query and press Search — recent results shown first.</div>
+        </div>
+
+        <div id="loadMoreWrap" class="center" style="display:none">
+          <button id="loadMore" class="btn primary">Load more</button>
+        </div>
+      </div>
+      <div class="footer">Developed by Sujan Prodhan, RU, CSE</div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+const qInput=document.getElementById('q');
+const searchBtn=document.getElementById('searchBtn');
+const resultsEl=document.getElementById('results');
+const statusInfo=document.getElementById('statusInfo');
+const loadMoreBtn=document.getElementById('loadMore');
+const loadMoreWrap=document.getElementById('loadMoreWrap');
+const selectPageBtn=document.getElementById('selectPage');
+const clearSelBtn=document.getElementById('clearSel');
+const downloadSelBtn=document.getElementById('downloadSel');
+const zipSelBtn=document.getElementById('zipSel');
+
+const sortBy=document.getElementById('sortBy');
+const sortOrder=document.getElementById('sortOrder');
+
+let results=[];
+let selected=new Set();
+let start=0;
+const perPage=25;
+let hasMore=false;
+let loading=false;
+let abortController=null;
+
+function el(tag,props={},...children){
+  const e=document.createElement(tag);
+  for(const k in props){
+    if(k==='class') e.className=props[k];
+    else if(k==='html') e.innerHTML=props[k];
+    else e.setAttribute(k,props[k]);
+  }
+  children.forEach(c=>{
+    if(typeof c==='string') e.appendChild(document.createTextNode(c));
+    else if(c instanceof Node) e.appendChild(c);
+  });
+  return e;
+}
+
+function parseArxivAtom(xmlText){
+  const parser=new DOMParser();
+  const xml=parser.parseFromString(xmlText,'application/xml');
+  const entries=Array.from(xml.getElementsByTagName('entry'));
+  return entries.map(entry=>{
+    const id=getText(entry,'id');
+    const title=(getText(entry,'title')||'').replace(/\s+/g,' ').trim();
+    const summary=(getText(entry,'summary')||'').replace(/\s+/g,' ').trim();
+    const updated=getText(entry,'updated');
+    const published=getText(entry,'published');
+    const authors=Array.from(entry.getElementsByTagName('author')).map(a=>getText(a,'name')).filter(Boolean);
+    let pdfUrl=null;
+    if(id && id.includes('/abs/')) pdfUrl=id.replace('/abs/','/pdf/')+'.pdf';
+    else{
+      const links=Array.from(entry.getElementsByTagName('link'));
+      for(const l of links){
+        const href=l.getAttribute('href')||'';
+        const title=l.getAttribute('title')||'';
+        if(title==='pdf'||href.endsWith('.pdf')){pdfUrl=href;break;}
+      }
+    }
+    return {id,title,summary,updated,published,authors,pdfUrl};
+  });
+}
+function getText(parent,tag){const el=parent.getElementsByTagName(tag)[0];return el?el.textContent:null}
+
+function formatDateAndAgo(dateStr){
+  const d=new Date(dateStr);
+  const day=String(d.getDate()).padStart(2,'0');
+  const month=String(d.getMonth()+1).padStart(2,'0');
+  const year=d.getFullYear();
+  const now=new Date();
+  const diffTime=Math.abs(now-d);
+  const diffDays=Math.floor(diffTime/(1000*60*60*24));
+  return `${day}/${month}/${year} • ${diffDays} days ago`;
+}
+
+function renderResults(replace=false){
+  if(replace) resultsEl.innerHTML='';
+  if(results.length===0 && !loading){
+    resultsEl.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)">No results — try a broader query.</div>';
+    statusInfo.textContent='No results';
+    loadMoreWrap.style.display='none';
+    return;
+  }
+  results.forEach((r,idx)=>{
+    if(r._rendered) return;
+    const row=el('div',{class:'item',role:'listitem',tabindex:0});
+    const serial=el('div',{},`${idx+1}.`);
+    row.appendChild(serial);
+
+    const cb=el('input',{type:'checkbox',class:'checkbox'});
+    cb.checked=selected.has(r.id);
+    cb.addEventListener('change',()=>toggleSelection(r.id));
+    row.appendChild(cb);
+
+    const content=el('div',{style:'flex:1'});
+    content.appendChild(el('h3',{class:'title'},r.title||'(no title)'));
+    const metaEl=el('div',{class:'meta'});
+    if(r.published){
+      metaEl.innerHTML=(r.authors.join(', ')||'')+' • '+'<span class="date-highlight">'+formatDateAndAgo(r.published)+'</span>';
+    } else {metaEl.textContent=r.authors.join(', ');}
+    content.appendChild(metaEl);
+    content.appendChild(el('div',{class:'summary'},r.summary||''));
+    row.appendChild(content);
+
+    const actions=el('div',{class:'actions'});
+    actions.appendChild(el('a',{href:r.id,target:'_blank',rel:'noreferrer',class:'badge'},'Abstract'));
+    if(r.pdfUrl) actions.appendChild(el('a',{href:r.pdfUrl,target:'_blank',rel:'noreferrer',class:'badge'},'PDF'));
+    else actions.appendChild(el('span',{class:'badge muted'},'No PDF'));
+    const quick=el('button',{class:'btn primary',title:'Quick open PDF'},'Quick Open');
+    quick.addEventListener('click',()=>{if(r.pdfUrl) window.open(r.pdfUrl,'_blank');else alert('No PDF link');});
+    actions.appendChild(quick);
+    row.appendChild(actions);
+
+    resultsEl.appendChild(row);
+    r._rendered=true;
+  });
+  statusInfo.textContent=`Showing ${results.length} results ${loading?'— loading...':''}`;
+  loadMoreWrap.style.display=hasMore?'flex':'none';
+  updateSelectedUI();
+}
+
+function updateSelectedUI(){
+  downloadSelBtn.textContent=`Download selected (${selected.size})`;
+}
+
+function toggleSelection(id){
+  if(selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  updateSelectedUI();
+}
+
+function selectAllOnPage(){results.forEach(r=>selected.add(r.id));updateSelectedUI();resultsEl.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=true);}
+function clearSelection(){selected.clear();updateSelectedUI();resultsEl.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=false);}
+
+async function fetchResults(st=0,replace=false){
+  const q=qInput.value.trim();
+  if(!q){results=[];renderResults(true);return;}
+  if(abortController) abortController.abort();
+  abortController=new AbortController();
+  loading=true;
+  statusInfo.textContent='Searching...';
+  const encoded=encodeURIComponent(q);
+  const url=`https://export.arxiv.org/api/query?search_query=all:${encoded}&start=${st}&max_results=${perPage}&sortBy=${sortBy.value}&sortOrder=${sortOrder.value}`;
+  try{
+    const res=await fetch(url,{signal:abortController.signal});
+    if(!res.ok) throw new Error('arXiv API error: '+res.status);
+    const text=await res.text();
+    const parsed=parseArxivAtom(text);
+    if(replace){results=parsed;results.forEach(r=>r._rendered=false);}
+    else{parsed.forEach(r=>{r._rendered=false;results.push(r);});}
+    start=st+parsed.length;
+    hasMore=parsed.length===perPage;
+    renderResults(replace);
+  }catch(e){if(e.name==='AbortError')return;console.error(e);statusInfo.textContent='Error: '+(e.message||'Failed to fetch');}
+  finally{loading=false;}
+}
+
+searchBtn.addEventListener('click',()=>{results=[];start=0;selected.clear();fetchResults(0,true);});
+qInput.addEventListener('keydown',(e)=>{if(e.key==='Enter'){results=[];start=0;selected.clear();fetchResults(0,true);}});
+sortBy.addEventListener('change',()=>{results=[];start=0;fetchResults(0,true);});
+sortOrder.addEventListener('change',()=>{results=[];start=0;fetchResults(0,true);});
+loadMoreBtn&&loadMoreBtn.addEventListener('click',()=>{if(loading)return;fetchResults(start,false);});
+selectPageBtn.addEventListener('click',()=>selectAllOnPage());
+clearSelBtn.addEventListener('click',()=>clearSelection());
+
+downloadSelBtn.addEventListener('click',()=>{
+  if(selected.size===0)return alert('No papers selected.');
+  results.filter(r=>selected.has(r.id)).forEach(item=>{
+    if(item.pdfUrl) window.open(item.pdfUrl,'_blank'); else window.open(item.id,'_blank');
+  });
+});
+
+resultsEl.addEventListener('scroll',()=>{
+  if(!hasMore||loading) return;
+  const {scrollTop,scrollHeight,clientHeight}=resultsEl;
+  if(scrollHeight-scrollTop-clientHeight<320) fetchResults(start,false);
+});
+
+})();
+</script>
+</body>
+</html>
